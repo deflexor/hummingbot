@@ -25,16 +25,18 @@ def start(self):
     max_spread = c_map.get("max_spread").value / Decimal("100")
     max_order_age = c_map.get("max_order_age").value
     derivative_connector = c_map.get("derivative_connector").value.lower()
-    derivative_market = c_map.get("derivative_market").value
+    #derivative_market = c_map.get("derivative_market").value
     derivative_leverage = c_map.get("derivative_leverage").value
     
 
-    self._initialize_markets([(exchange, markets)])
+    self._initialize_markets([(exchange, markets), (derivative_connector, markets)])
     exchange = self.markets[exchange]
     market_infos = {}
+    derivative_market_infos = {}
     for market in markets:
         base, quote = market.split("-")
         market_infos[market] = MarketTradingPairTuple(exchange, market, base, quote)
+        derivative_market_infos[market] = MarketTradingPairTuple(self.markets[derivative_connector], market, base, quote)
     self.strategy = HedgedLMStrategy(
         exchange=exchange,
         market_infos=market_infos,

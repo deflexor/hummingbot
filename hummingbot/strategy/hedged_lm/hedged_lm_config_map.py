@@ -37,7 +37,7 @@ def derivative_market_validator(value: str) -> None:
     mkts = ','.split(value)
     for m in mkts:
         exchange = liquidity_mining_config_map["derivative_connector"].value
-        r = validate_market_trading_pair(exchange, value):
+        r = validate_market_trading_pair(exchange, m)
         if r:            
             return r
 
@@ -66,7 +66,9 @@ liquidity_mining_config_map = {
         ConfigVar(key="markets",
                   prompt="Enter a list of markets (comma separated, e.g. LTC-USDT,ETH-USDT) >>> ",
                   type_str="str",
-                  prompt_on_new=True),
+                  prompt_on_new=True,
+                  validator=derivative_market_validator,
+                  on_validated=derivative_market_on_validated),
     "token":
         ConfigVar(key="token",
                   prompt="What asset (base or quote) do you want to use to provide liquidity? >>> ",
@@ -157,12 +159,12 @@ liquidity_mining_config_map = {
         prompt_on_new=True,
         validator=validate_derivative,
         on_validated=exchange_on_validated),
-    "derivative_market": ConfigVar(
-        key="derivative_market",
-        prompt=derivative_market_prompt,
-        prompt_on_new=True,
-        validator=derivative_market_validator,
-        on_validated=derivative_market_on_validated),
+    # "derivative_market": ConfigVar(
+    #     key="derivative_market",
+    #     prompt=derivative_market_prompt,
+    #     prompt_on_new=True,
+    #     validator=derivative_market_validator,
+    #     on_validated=derivative_market_on_validated),
     "derivative_leverage": ConfigVar(
         key="derivative_leverage",
         prompt="How much leverage would you like to use on the derivative exchange? (Enter 1 to indicate 1X) ",
