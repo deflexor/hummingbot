@@ -5,6 +5,7 @@ from typing import Dict, List, Set
 import pandas as pd
 import numpy as np
 from statistics import mean
+from hummingbot.core.utils.async_utils import safe_ensure_future
 import time
 from hummingbot.core.clock import Clock
 from hummingbot.logger import HummingbotLogger
@@ -12,13 +13,18 @@ from hummingbot.strategy.strategy_py_base import StrategyPyBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from .data_types import Proposal, PriceSize
-from hummingbot.core.event.events import OrderType, TradeType
+from hummingbot.core.event.events import OrderType, TradeType, PositionAction
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.utils.estimate_fee import estimate_fee
 from hummingbot.core.utils.market_price import usd_value
 from hummingbot.strategy.pure_market_making.inventory_skew_calculator import (
     calculate_bid_ask_ratios_from_base_asset_ratio
 )
+#  PositionSide,
+#  PositionMode
+
+from hummingbot.strategy.spot_perpetual_arbitrage.arb_proposal import ArbProposalSide, ArbProposal
+
 from hummingbot.connector.parrot import get_campaign_summary
 NaN = float("nan")
 s_decimal_zero = Decimal(0)
@@ -58,6 +64,8 @@ class HedgedLMStrategy(StrategyPyBase):
         super().__init__()
         self._exchange = exchange
         self._market_infos = market_infos
+        self._derivative_market_infos = derivative_market_infos
+        self._derivative_leverage = derivative_leverage
         self._token = token
         self._order_amount = order_amount
         self._spread = spread
@@ -456,6 +464,7 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
                 self._sell_budgets[market_info.trading_pair] += event.amount
+                self.exec_hedge_side(event)
             else:
                 msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
                       f"{market_info.base_asset} is filled."
@@ -463,6 +472,25 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._sell_budgets[market_info.trading_pair] -= event.amount
                 self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+    
+    def exec_hedge_side(self, event):
+        current_proposal = ArbProposal(self._spot_market_info, self._derivative_market_info, self.order_amount, self._last_timestamp)        
+        safe_ensure_future(self.execute_derivative_side(current_proposal.derivative_side))  
+
+    async def execute_derivative_side(self, arb_side: ArbProposalSide):
+        side = "BUY" if arb_side.is_buy else "SELL"
+        place_order_fn = self.buy_with_specific_market if arb_side.is_buy else self.sell_with_specific_market
+        position_action = PositionAction.OPEN if len(self.deriv_position) == 0 else PositionAction.CLOSE
+        self.log_with_clock(logging.INFO,
+                            f"Placing {side} order for {arb_side.amount} {arb_side.market_info.base_asset} "
+                            f"at {arb_side.market_info.market.display_name} at {arb_side.order_price} price to {position_action.name} position.")
+        order_id = place_order_fn(arb_side.market_info,
+                                  arb_side.amount,
+                                  arb_side.market_info.market.get_taker_order_type(),
+                                  arb_side.order_price,
+                                  position_action=position_action
+                                  )
+        self._deriv_order_ids.append(order_id)
 
     def update_mid_prices(self):
         for market in self._market_infos:
