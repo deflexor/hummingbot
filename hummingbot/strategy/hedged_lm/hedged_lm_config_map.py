@@ -22,7 +22,7 @@ def exchange_on_validated(value: str) -> None:
 
 def token_validate(value: str) -> Optional[str]:
     value = value.upper()
-    markets = list(liquidity_mining_config_map["markets"].value.split(","))
+    markets = list(hedged_lm_config_map["markets"].value.split(","))
     tokens = set()
     for market in markets:
         tokens.update(set(market.split("-")))
@@ -30,28 +30,28 @@ def token_validate(value: str) -> Optional[str]:
         return f"Invalid token. {value} is not one of {','.join(tokens)}"
 
 def order_size_prompt() -> str:
-    token = liquidity_mining_config_map["token"].value
+    token = hedged_lm_config_map["token"].value
     return f"What is the size of each order (in {token} amount)? >>> "
 
 def derivative_market_validator(value: str) -> None:
     mkts = ','.split(value)
     for m in mkts:
-        exchange = liquidity_mining_config_map["derivative_connector"].value
+        exchange = hedged_lm_config_map["derivative_connector"].value
         r = validate_market_trading_pair(exchange, m)
         if r:            
             return r
 
 def derivative_market_on_validated(value: str) -> None:
     mkts = ','.split(value)
-    requried_connector_trading_pairs[liquidity_mining_config_map["derivative_connector"].value] = mkts
+    requried_connector_trading_pairs[hedged_lm_config_map["derivative_connector"].value] = mkts
 
 def derivative_market_prompt() -> str:
-    connector = liquidity_mining_config_map.get("derivative_connector").value
+    connector = hedged_lm_config_map.get("derivative_connector").value
     example = EXAMPLE_PAIRS.get(connector)
     return "Enter the token trading pair you would like to trade on %s%s >>> " \
            % (connector, f" (e.g. {example})" if example else "")
 
-liquidity_mining_config_map = {
+hedged_lm_config_map = {
     "strategy": ConfigVar(
         key="strategy",
         prompt="",
@@ -71,7 +71,7 @@ liquidity_mining_config_map = {
                   on_validated=derivative_market_on_validated),
     "token":
         ConfigVar(key="token",
-                  prompt="What asset (base or quote) do you want to use to provide liquidity? >>> ",
+                  prompt="What asset (base or quote) do you want to use to provide liquidity? (you have most balance of) >>> ",
                   type_str="str",
                   validator=token_validate,
                   prompt_on_new=True),
