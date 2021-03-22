@@ -59,7 +59,6 @@ class HedgedLMStrategy(StrategyPyBase):
                  max_spread: Decimal = Decimal("-1"),
                  max_order_age: float = 60. * 60.,
                  status_report_interval: float = 900,
-                 derivative_leverage: int = 1,
                  hb_app_notification: bool = False):
         super().__init__()
         self._exchange = exchange
@@ -464,7 +463,7 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
                 self._sell_budgets[market_info.trading_pair] += event.amount
-                self.exec_hedge_side(event)
+                self.exec_hedge_side(event, market_info, True)
             else:
                 msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
                       f"{market_info.base_asset} is filled."
@@ -472,25 +471,32 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._sell_budgets[market_info.trading_pair] -= event.amount
                 self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+                self.exec_hedge_side(event, market_info, False)
     
-    def exec_hedge_side(self, event):
-        current_proposal = ArbProposal(self._spot_market_info, self._derivative_market_info, self.order_amount, self._last_timestamp)        
-        safe_ensure_future(self.execute_derivative_side(current_proposal.derivative_side))  
+    def exec_hedge_side(self, event, market_info, is_buy):
+        p = ArbProposalSide(
+            self._derivative_market_infos[market_info.trading_pair],
+            not is_buy,
+            event.price,
+            event.amount
+        )
+        safe_ensure_future(self.execute_derivative_side(p))
 
     async def execute_derivative_side(self, arb_side: ArbProposalSide):
         side = "BUY" if arb_side.is_buy else "SELL"
         place_order_fn = self.buy_with_specific_market if arb_side.is_buy else self.sell_with_specific_market
-        position_action = PositionAction.OPEN if len(self.deriv_position) == 0 else PositionAction.CLOSE
+        # len(self.deriv_position) == 0
+        # position_action = PositionAction.OPEN if open else PositionAction.CLOSE
         self.log_with_clock(logging.INFO,
                             f"Placing {side} order for {arb_side.amount} {arb_side.market_info.base_asset} "
                             f"at {arb_side.market_info.market.display_name} at {arb_side.order_price} price to {position_action.name} position.")
-        order_id = place_order_fn(arb_side.market_info,
-                                  arb_side.amount,
-                                  arb_side.market_info.market.get_taker_order_type(),
-                                  arb_side.order_price,
-                                  position_action=position_action
-                                  )
-        self._deriv_order_ids.append(order_id)
+        place_order_fn(arb_side.market_info,
+                       arb_side.amount,
+                       arb_side.market_info.market.get_taker_order_type(),
+                       arb_side.order_price
+        #               position_action=position_action
+                    )
+        #self._deriv_order_ids.append(order_id)
 
     def update_mid_prices(self):
         for market in self._market_infos:

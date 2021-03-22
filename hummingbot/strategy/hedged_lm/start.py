@@ -2,7 +2,9 @@ from decimal import Decimal
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.strategy.hedged_lm.hedged_lm import HedgedLMStrategy
 from hummingbot.strategy.hedged_lm.hedged_lm import hedged_lm_config_map as c_map
-
+from hummingbot.core.event.events import (
+    PositionMode
+)
 
 def start(self):
     exchange = c_map.get("exchange").value.lower()
@@ -33,10 +35,13 @@ def start(self):
     exchange = self.markets[exchange]
     market_infos = {}
     derivative_market_infos = {}
-    for market in markets:
-        base, quote = market.split("-")
-        market_infos[market] = MarketTradingPairTuple(exchange, market, base, quote)
-        derivative_market_infos[market] = MarketTradingPairTuple(self.markets[derivative_connector], market, base, quote)
+    for trading_pair in markets:
+        base, quote = trading_pair.split("-")
+        market_infos[trading_pair] = MarketTradingPairTuple(exchange, trading_pair, base, quote)
+        derivative_market_infos[trading_pair] = MarketTradingPairTuple(self.markets[derivative_connector], trading_pair, base, quote)
+        deriv_market = derivative_market_infos[trading_pair].market
+        deriv_market.set_leverage(trading_pair, derivative_leverage)
+        deriv_market.set_position_mode(PositionMode.HEDGE)
     self.strategy = HedgedLMStrategy(
         exchange=exchange,
         market_infos=market_infos,
@@ -54,6 +59,5 @@ def start(self):
         volatility_to_spread_multiplier=volatility_to_spread_multiplier,
         max_spread=max_spread,
         max_order_age=max_order_age,
-        derivative_leverage=derivative_leverage,
         hb_app_notification=True
     )
