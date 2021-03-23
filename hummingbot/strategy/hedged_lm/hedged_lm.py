@@ -43,6 +43,7 @@ class HedgedLMStrategy(StrategyPyBase):
 
     def __init__(self,
                  exchange: ExchangeBase,
+                 deriv_exchange: ExchangeBase,
                  market_infos: Dict[str, MarketTradingPairTuple],
                  derivative_market_infos: Dict[str, MarketTradingPairTuple],
                  token: str,
@@ -64,7 +65,6 @@ class HedgedLMStrategy(StrategyPyBase):
         self._exchange = exchange
         self._market_infos = market_infos
         self._derivative_market_infos = derivative_market_infos
-        self._derivative_leverage = derivative_leverage
         self._token = token
         self._order_amount = order_amount
         self._spread = spread
@@ -91,7 +91,7 @@ class HedgedLMStrategy(StrategyPyBase):
         self._last_vol_reported = 0.
         self._hb_app_notification = hb_app_notification
 
-        self.add_markets([exchange])
+        self.add_markets([exchange, deriv_exchange])
 
     @property
     def active_orders(self):
@@ -481,20 +481,21 @@ class HedgedLMStrategy(StrategyPyBase):
             event.amount
         )
         safe_ensure_future(self.execute_derivative_side(p))
+        #self.execute_derivative_side(p)
 
     async def execute_derivative_side(self, arb_side: ArbProposalSide):
         side = "BUY" if arb_side.is_buy else "SELL"
         place_order_fn = self.buy_with_specific_market if arb_side.is_buy else self.sell_with_specific_market
         # len(self.deriv_position) == 0
-        # position_action = PositionAction.OPEN if open else PositionAction.CLOSE
+        position_action = PositionAction.OPEN
         self.log_with_clock(logging.INFO,
                             f"Placing {side} order for {arb_side.amount} {arb_side.market_info.base_asset} "
-                            f"at {arb_side.market_info.market.display_name} at {arb_side.order_price} price to {position_action.name} position.")
+                            f"at {arb_side.market_info.market.display_name} at {arb_side.order_price} price.")
         place_order_fn(arb_side.market_info,
                        arb_side.amount,
                        arb_side.market_info.market.get_taker_order_type(),
-                       arb_side.order_price
-        #               position_action=position_action
+                       arb_side.order_price,
+                       position_action=position_action
                     )
         #self._deriv_order_ids.append(order_id)
 

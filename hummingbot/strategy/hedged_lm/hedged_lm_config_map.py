@@ -55,7 +55,7 @@ hedged_lm_config_map = {
     "strategy": ConfigVar(
         key="strategy",
         prompt="",
-        default="liquidity_mining"),
+        default="hedged_lm"),
     "exchange":
         ConfigVar(key="exchange",
                   prompt="Enter the spot connector to use for liquidity mining >>> ",
