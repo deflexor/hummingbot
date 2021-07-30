@@ -90,6 +90,8 @@ class HedgedLMStrategy(StrategyPyBase):
         self._volatility = {market: s_decimal_nan for market in self._market_infos}
         self._last_vol_reported = 0.
         self._hb_app_notification = hb_app_notification
+        self._last_n_losses = 0
+        self._is_buy = True
 
         self.add_markets([deriv_exchange])
 
@@ -263,12 +265,14 @@ class HedgedLMStrategy(StrategyPyBase):
             size1p = price * 0.01
             bal1p = bal * 0.01
             size = self._exchange.quantize_order_size(bal1p / size1p)
-            if self._lastNlosses > 2:
+            self.logger().info(f"create_base_proposal order size:{size}")
+            if self._last_n_losses > 2:
                 self._is_buy = not self._is_buy
-                self._lastNlosses = 0
+                self._last_n_losses = 0
             pq = market_info.get_order_price_quantum()
             if self._is_buy:
                 price = market_info.get_price_by_type(PriceType.BestBid) + pq
+                self.logger().info(f"create_base_proposal is_buy price:{market_info.get_price_by_type(PriceType.BestBid)} + {pq} = {price}")
             else:
                 price = market_info.get_price_by_type(PriceType.BestAsk) - pq
             side = PositionSide.LONG if self._is_buy else PositionSide.SHORT
@@ -365,18 +369,21 @@ class HedgedLMStrategy(StrategyPyBase):
             self.logger().info(f"({proposal.market}) Creating a {proposal.dir} order {proposal.size} value: "
                                 f"{proposal.size * proposal.price:.2f} {proposal.quote()}")
             place_order_fn = self.buy_with_specific_market if proposal.dir == PositionSide.LONG else self.sell_with_specific_market
-            place_order_fn(
+            r = place_order_fn(
                 self._derivative_market_infos[proposal.market],
                 proposal.size,
                 order_type=OrderType.LIMIT_MAKER,
                 price=proposal.price,
                 position_action = PositionAction.OPEN
             )
+            self.logger().info(f"place_order_fn result: {r}")
             self._refresh_times[proposal.market] = self.current_timestamp + self._order_refresh_time
 
     def did_fill_order(self, event):
         order_id = event.order_id
         market_info = self.order_tracker.get_shadow_market_pair_from_order_id(order_id)
+        market_info1 = self.order_tracker.get_market_pair_from_order_id(order_id)
+        self.logger().info(f"did_fill_order mi:{market_info} mi:{market_info1} e:{event}")
         if market_info is not None:
             if event.trade_type is TradeType.BUY:
                 msg = f"({market_info.trading_pair}) Maker BUY order (price: {event.price}) of {event.amount} " \
@@ -385,7 +392,6 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
                 self._sell_budgets[market_info.trading_pair] += event.amount
-                self.exec_hedge_side(event, market_info, True)
             else:
                 msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
                       f"{market_info.base_asset} is filled."
@@ -393,7 +399,6 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.notify_hb_app(msg)
                 self._sell_budgets[market_info.trading_pair] -= event.amount
                 self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
-                self.exec_hedge_side(event, market_info, False)
 
     def is_token_a_quote_token(self):
         quotes = self.all_quote_tokens()
