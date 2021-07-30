@@ -321,17 +321,18 @@ class HedgedLMStrategy(StrategyPyBase):
     def apply_budget_constraint(self, proposals: List[Proposal]):
         balances = self._token_balances.copy()
         for proposal in proposals:
-            if balances[proposal.base()] < proposal.sell.size:
-                proposal.sell.size = balances[proposal.base()]
-            proposal.sell.size = self._exchange.quantize_order_amount(proposal.market, proposal.sell.size)
-            balances[proposal.base()] -= proposal.sell.size
-
-            quote_size = proposal.buy.size * proposal.buy.price
-            quote_size = balances[proposal.quote()] if balances[proposal.quote()] < quote_size else quote_size
-            buy_fee = estimate_fee(self._exchange.name, True)
-            buy_size = quote_size / (proposal.buy.price * (Decimal("1") + buy_fee.percent))
-            proposal.buy.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
-            balances[proposal.quote()] -= quote_size
+            if proposal.dir == PositionSide.SHORT:
+                if balances[proposal.base()] < proposal.size:
+                    proposal.size = balances[proposal.base()]
+                proposal.size = self._exchange.quantize_order_amount(proposal.market, proposal.size)
+                balances[proposal.base()] -= proposal.size
+            else:
+                quote_size = proposal.size * proposal.price
+                quote_size = balances[proposal.quote()] if balances[proposal.quote()] < quote_size else quote_size
+                buy_fee = estimate_fee(self._exchange.name, True)
+                buy_size = quote_size / (proposal.price * (Decimal("1") + buy_fee.percent))
+                proposal.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
+                balances[proposal.quote()] -= quote_size
 
     def is_within_tolerance(self, cur_orders: List[LimitOrder], proposal: Proposal):
         cur_buy = [o for o in cur_orders if o.is_buy]
@@ -350,6 +351,7 @@ class HedgedLMStrategy(StrategyPyBase):
         for proposal in proposals:
             to_cancel = False
             cur_orders = [o for o in self.active_orders if o.trading_pair == proposal.market]
+            self.logger().info(f"order age for {cur_orders[0]}: {self.order_age(cur_orders[0])}")
             if cur_orders and any(self.order_age(o) > self._max_order_age for o in cur_orders):
                 to_cancel = True
             elif self._refresh_times[proposal.market] <= self.current_timestamp and \
@@ -374,7 +376,8 @@ class HedgedLMStrategy(StrategyPyBase):
                 proposal.size,
                 order_type=OrderType.LIMIT_MAKER,
                 price=proposal.price,
-                position_action = PositionAction.OPEN
+                position_action = PositionAction.OPEN,
+                expiration_seconds = 1 # mark base order
             )
             self.logger().info(f"place_order_fn result: {r}")
             self._refresh_times[proposal.market] = self.current_timestamp + self._order_refresh_time
