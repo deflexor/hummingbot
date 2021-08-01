@@ -63,24 +63,6 @@ iman_config_map = {
                   prompt_on_new=True,
                   validator=derivative_market_validator,
                   on_validated=derivative_market_on_validated),
-    "token":
-        ConfigVar(key="token",
-                  prompt="What asset (base or quote) do you want to use to provide liquidity? (you have most balance of) >>> ",
-                  type_str="str",
-                  validator=token_validate,
-                  prompt_on_new=True),
-    "order_amount":
-        ConfigVar(key="order_amount",
-                  prompt=order_size_prompt,
-                  type_str="decimal",
-                  validator=lambda v: validate_decimal(v, 0, inclusive=False),
-                  prompt_on_new=True),
-    "target_base_pct":
-        ConfigVar(key="target_base_pct",
-                  prompt="For each pair, what is your target base asset percentage? (Enter 20 to indicate 20%) >>> ",
-                  type_str="decimal",
-                  validator=lambda v: validate_decimal(v, 0, 100, inclusive=False),
-                  prompt_on_new=True),
     "order_refresh_time":
         ConfigVar(key="order_refresh_time",
                   prompt="How often do you want to cancel and replace bids and asks "
@@ -95,13 +77,6 @@ iman_config_map = {
                   type_str="decimal",
                   default=Decimal("0.2"),
                   validator=lambda v: validate_decimal(v, -10, 10, inclusive=True)),
-    "inventory_range_multiplier":
-        ConfigVar(key="inventory_range_multiplier",
-                  prompt="What is your tolerable range of inventory around the target, "
-                         "expressed in multiples of your total order size? ",
-                  type_str="decimal",
-                  validator=lambda v: validate_decimal(v, min_value=0, inclusive=False),
-                  default=Decimal("1")),
     "max_order_age":
         ConfigVar(key="max_order_age",
                   prompt="What is the maximum life time of your orders (in seconds)? >>> ",

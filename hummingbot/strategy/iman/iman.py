@@ -5,21 +5,20 @@ from typing import Dict, List, Set
 import pandas as pd
 import numpy as np
 from statistics import mean
-from hummingbot.core.utils.async_utils import safe_ensure_future
-import time
 from hummingbot.core.clock import Clock
 from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy.strategy_py_base import StrategyPyBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from .data_types import Proposal
-from hummingbot.core.event.events import OrderType, PositionSide, PriceType, TradeType, PositionAction
+from hummingbot.core.event.events import OrderType, PositionSide, TradeType, PriceType
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.utils.estimate_fee import estimate_fee
-from hummingbot.core.utils.market_price import usd_value
 from hummingbot.strategy.pure_market_making.inventory_skew_calculator import (
     calculate_bid_ask_ratios_from_base_asset_ratio
 )
+from hummingbot.connector.parrot import get_campaign_summary
+from hummingbot.core.rate_oracle.rate_oracle import RateOracle
 #  PositionSide,
 #  PositionMode
 
@@ -45,11 +44,8 @@ class HedgedLMStrategy(StrategyPyBase):
                  deriv_exchange: ExchangeBase,
                  derivative_market_infos: Dict[str, MarketTradingPairTuple],
                  token: str,
-                 order_amount: Decimal,
-                 target_base_pct: Decimal,
                  order_refresh_time: float,
                  order_refresh_tolerance_pct: Decimal,
-                 inventory_range_multiplier: Decimal = Decimal("1"),
                  max_order_age: float = 60. * 60.,
                  status_report_interval: float = 900,
                  hb_app_notification: bool = False):
@@ -58,11 +54,8 @@ class HedgedLMStrategy(StrategyPyBase):
         #self._market_infos = market_infos
         self._derivative_market_infos = derivative_market_infos
         self._token = token
-        self._order_amount = order_amount
         self._order_refresh_time = order_refresh_time
         self._order_refresh_tolerance_pct = order_refresh_tolerance_pct
-        self._target_base_pct = target_base_pct
-        self._inventory_range_multiplier = inventory_range_multiplier
         self._max_order_age = max_order_age
         self._ev_loop = asyncio.get_event_loop()
         self._last_timestamp = 0
@@ -112,12 +105,6 @@ class HedgedLMStrategy(StrategyPyBase):
         self.execute_orders_proposal(proposals)
 
         self._last_timestamp = timestamp
-
-    @staticmethod
-    def order_age(order: LimitOrder) -> float:
-        if "//" not in order.client_order_id:
-            return int(time.time()) - int(order.client_order_id[-16:]) / 1e6
-        return -1.
 
     async def active_orders_df(self) -> pd.DataFrame:
         size_q_col = f"Amt({self._token})" if self.is_token_a_quote_token() else "Amt(Quote)"
@@ -188,16 +175,20 @@ class HedgedLMStrategy(StrategyPyBase):
         return df
 
     async def miner_status_df(self) -> pd.DataFrame:
+        """
+        Return the miner status (payouts, rewards, liquidity, etc.) in a DataFrame
+        """
         data = []
+        g_sym = RateOracle.global_token_symbol
         columns = ["Market", "Payout", "Reward/wk", "Liquidity", "Yield/yr", "Max spread"]
         campaigns = await get_campaign_summary(self._exchange.display_name, list(self._market_infos.keys()))
         for market, campaign in campaigns.items():
-            reward_usd = await usd_value(campaign.payout_asset, campaign.reward_per_wk)
+            reward = await RateOracle.global_value(campaign.payout_asset, campaign.reward_per_wk)
             data.append([
                 market,
                 campaign.payout_asset,
-                f"${reward_usd:.0f}",
-                f"${campaign.liquidity_usd:.0f}",
+                f"{g_sym}{reward:.0f}",
+                f"{g_sym}{campaign.liquidity_usd:.0f}",
                 f"{campaign.apy:.2%}",
                 f"{campaign.spread_max:.2%}%"
             ])
@@ -262,7 +253,7 @@ class HedgedLMStrategy(StrategyPyBase):
             else:
                 price = market_info.get_price_by_type(PriceType.BestAsk) - pq
             side = PositionSide.LONG if self._is_buy else PositionSide.SHORT
-            proposal = Proposal(market, side, PriceSize(price, size))
+            proposal = Proposal(market, side, price, size)
         return proposal
 
     def total_port_value_in_token(self) -> Decimal:
