@@ -13,7 +13,7 @@ from hummingbot.strategy.strategy_py_base import StrategyPyBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from .data_types import Proposal, PriceSize
-from hummingbot.core.event.events import OrderType, PositionSide, PriceType, TradeType, PositionAction
+from hummingbot.core.event.events import OrderType, TradeType, PositionAction
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.utils.estimate_fee import estimate_fee
 from hummingbot.core.utils.market_price import usd_value
@@ -90,10 +90,8 @@ class HedgedLMStrategy(StrategyPyBase):
         self._volatility = {market: s_decimal_nan for market in self._market_infos}
         self._last_vol_reported = 0.
         self._hb_app_notification = hb_app_notification
-        self._last_n_losses = 0
-        self._is_buy = True
 
-        self.add_markets([deriv_exchange])
+        self.add_markets([exchange, deriv_exchange])
 
     @property
     def active_orders(self):
@@ -116,11 +114,11 @@ class HedgedLMStrategy(StrategyPyBase):
                 self.create_budget_allocation()
 
         self.update_mid_prices()
-        #self.update_volatility()
+        self.update_volatility()
         proposals = self.create_base_proposals()
         self._token_balances = self.adjusted_available_balances()
-        #if self._inventory_skew_enabled:
-        #    self.apply_inventory_skew(proposals)
+        if self._inventory_skew_enabled:
+            self.apply_inventory_skew(proposals)
         self.apply_budget_constraint(proposals)
         self.cancel_active_orders(proposals)
         self.execute_orders_proposal(proposals)
@@ -256,28 +254,24 @@ class HedgedLMStrategy(StrategyPyBase):
     def stop(self, clock: Clock):
         pass
 
-    def create_base_proposal(self):
-        proposal = None
-        all_bals = self.adjusted_available_balances()
-        for market, market_info in self._derivative_market_infos.items():
-            _base, quote = market.split("-")
-            bal = all_bals[quote]
-            size1p = price * 0.01
-            bal1p = bal * 0.01
-            size = self._exchange.quantize_order_size(bal1p / size1p)
-            self.logger().info(f"create_base_proposal order size:{size}")
-            if self._last_n_losses > 2:
-                self._is_buy = not self._is_buy
-                self._last_n_losses = 0
-            pq = market_info.get_order_price_quantum()
-            if self._is_buy:
-                price = market_info.get_price_by_type(PriceType.BestBid) + pq
-                self.logger().info(f"create_base_proposal is_buy price:{market_info.get_price_by_type(PriceType.BestBid)} + {pq} = {price}")
-            else:
-                price = market_info.get_price_by_type(PriceType.BestAsk) - pq
-            side = PositionSide.LONG if self._is_buy else PositionSide.SHORT
-            proposal = Proposal(market, side, PriceSize(price, size))
-        return proposal
+    def create_base_proposals(self):
+        proposals = []
+        for market, market_info in self._market_infos.items():
+            spread = self._spread
+            if not self._volatility[market].is_nan():
+                # volatility applies only when it is higher than the spread setting.
+                spread = max(spread, self._volatility[market] * self._volatility_to_spread_multiplier)
+            if self._max_spread > s_decimal_zero:
+                spread = min(spread, self._max_spread)
+            mid_price = market_info.get_mid_price()
+            buy_price = mid_price * (Decimal("1") - spread)
+            buy_price = self._exchange.quantize_order_price(market, buy_price)
+            buy_size = self.base_order_size(market, buy_price)
+            sell_price = mid_price * (Decimal("1") + spread)
+            sell_price = self._exchange.quantize_order_price(market, sell_price)
+            sell_size = self.base_order_size(market, sell_price)
+            proposals.append(Proposal(market, PriceSize(buy_price, buy_size), PriceSize(sell_price, sell_size)))
+        return proposals
 
     def total_port_value_in_token(self) -> Decimal:
         all_bals = self.adjusted_available_balances()
@@ -321,18 +315,17 @@ class HedgedLMStrategy(StrategyPyBase):
     def apply_budget_constraint(self, proposals: List[Proposal]):
         balances = self._token_balances.copy()
         for proposal in proposals:
-            if proposal.dir == PositionSide.SHORT:
-                if balances[proposal.base()] < proposal.size:
-                    proposal.size = balances[proposal.base()]
-                proposal.size = self._exchange.quantize_order_amount(proposal.market, proposal.size)
-                balances[proposal.base()] -= proposal.size
-            else:
-                quote_size = proposal.size * proposal.price
-                quote_size = balances[proposal.quote()] if balances[proposal.quote()] < quote_size else quote_size
-                buy_fee = estimate_fee(self._exchange.name, True)
-                buy_size = quote_size / (proposal.price * (Decimal("1") + buy_fee.percent))
-                proposal.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
-                balances[proposal.quote()] -= quote_size
+            if balances[proposal.base()] < proposal.sell.size:
+                proposal.sell.size = balances[proposal.base()]
+            proposal.sell.size = self._exchange.quantize_order_amount(proposal.market, proposal.sell.size)
+            balances[proposal.base()] -= proposal.sell.size
+
+            quote_size = proposal.buy.size * proposal.buy.price
+            quote_size = balances[proposal.quote()] if balances[proposal.quote()] < quote_size else quote_size
+            buy_fee = estimate_fee(self._exchange.name, True)
+            buy_size = quote_size / (proposal.buy.price * (Decimal("1") + buy_fee.percent))
+            proposal.buy.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
+            balances[proposal.quote()] -= quote_size
 
     def is_within_tolerance(self, cur_orders: List[LimitOrder], proposal: Proposal):
         cur_buy = [o for o in cur_orders if o.is_buy]
@@ -351,7 +344,6 @@ class HedgedLMStrategy(StrategyPyBase):
         for proposal in proposals:
             to_cancel = False
             cur_orders = [o for o in self.active_orders if o.trading_pair == proposal.market]
-            self.logger().info(f"order age for {cur_orders[0]}: {self.order_age(cur_orders[0])}")
             if cur_orders and any(self.order_age(o) > self._max_order_age for o in cur_orders):
                 to_cancel = True
             elif self._refresh_times[proposal.market] <= self.current_timestamp and \
@@ -368,40 +360,38 @@ class HedgedLMStrategy(StrategyPyBase):
             cur_orders = [o for o in self.active_orders if o.trading_pair == proposal.market]
             if cur_orders or self._refresh_times[proposal.market] > self.current_timestamp:
                 continue
-            self.logger().info(f"({proposal.market}) Creating a {proposal.dir} order {proposal.size} value: "
-                                f"{proposal.size * proposal.price:.2f} {proposal.quote()}")
-            place_order_fn = self.buy_with_specific_market if proposal.dir == PositionSide.LONG else self.sell_with_specific_market
-            r = place_order_fn(
-                self._derivative_market_infos[proposal.market],
-                proposal.size,
-                order_type=OrderType.LIMIT_MAKER,
-                price=proposal.price,
-                position_action = PositionAction.OPEN,
-                expiration_seconds = 1 # mark base order
-            )
-            self.logger().info(f"place_order_fn result: {r}")
-            self._refresh_times[proposal.market] = self.current_timestamp + self._order_refresh_time
+            mid_price = self._market_infos[proposal.market].get_mid_price()
+            spread = s_decimal_zero
+            if proposal.buy.size > 0:
+                spread = abs(proposal.buy.price - mid_price) / mid_price
+                self.logger().info(f"({proposal.market}) Creating a bid order {proposal.buy} value: "
+                                   f"{proposal.buy.size * proposal.buy.price:.2f} {proposal.quote()} spread: "
+                                   f"{spread:.2%}")
+                self.buy_with_specific_market(
+                    self._market_infos[proposal.market],
+                    proposal.buy.size,
+                    order_type=OrderType.LIMIT_MAKER,
+                    price=proposal.buy.price
+                )
+            if proposal.sell.size > 0:
+                spread = abs(proposal.sell.price - mid_price) / mid_price
+                self.logger().info(f"({proposal.market}) Creating an ask order at {proposal.sell} value: "
+                                   f"{proposal.sell.size * proposal.sell.price:.2f} {proposal.quote()} spread: "
+                                   f"{spread:.2%}")
+                self.sell_with_specific_market(
+                    self._market_infos[proposal.market],
+                    proposal.sell.size,
+                    order_type=OrderType.LIMIT_MAKER,
+                    price=proposal.sell.price
+                )
+            if proposal.buy.size > 0 or proposal.sell.size > 0:
+                if not self._volatility[proposal.market].is_nan() and spread > self._spread:
+                    adjusted_vol = self._volatility[proposal.market] * self._volatility_to_spread_multiplier
+                    if adjusted_vol > self._spread:
+                        self.logger().info(f"({proposal.market}) Spread is widened to {spread:.2%} due to high "
+                                           f"market volatility")
 
-    def did_fill_order(self, event):
-        order_id = event.order_id
-        market_info = self.order_tracker.get_shadow_market_pair_from_order_id(order_id)
-        market_info1 = self.order_tracker.get_market_pair_from_order_id(order_id)
-        self.logger().info(f"did_fill_order mi:{market_info} mi:{market_info1} e:{event}")
-        if market_info is not None:
-            if event.trade_type is TradeType.BUY:
-                msg = f"({market_info.trading_pair}) Maker BUY order (price: {event.price}) of {event.amount} " \
-                      f"{market_info.base_asset} is filled."
-                self.log_with_clock(logging.INFO, msg)
-                self.notify_hb_app(msg)
-                self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
-                self._sell_budgets[market_info.trading_pair] += event.amount
-            else:
-                msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
-                      f"{market_info.base_asset} is filled."
-                self.log_with_clock(logging.INFO, msg)
-                self.notify_hb_app(msg)
-                self._sell_budgets[market_info.trading_pair] -= event.amount
-                self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+                self._refresh_times[proposal.market] = self.current_timestamp + self._order_refresh_time
 
     def is_token_a_quote_token(self):
         quotes = self.all_quote_tokens()
@@ -462,12 +452,59 @@ class HedgedLMStrategy(StrategyPyBase):
             proposal.buy.size *= Decimal(bid_ask_ratios.bid_ratio)
             proposal.sell.size *= Decimal(bid_ask_ratios.ask_ratio)
 
+    def did_fill_order(self, event):
+        order_id = event.order_id
+        market_info = self.order_tracker.get_shadow_market_pair_from_order_id(order_id)
+        if market_info is not None:
+            if event.trade_type is TradeType.BUY:
+                msg = f"({market_info.trading_pair}) Maker BUY order (price: {event.price}) of {event.amount} " \
+                      f"{market_info.base_asset} is filled."
+                self.log_with_clock(logging.INFO, msg)
+                self.notify_hb_app(msg)
+                self._buy_budgets[market_info.trading_pair] -= (event.amount * event.price)
+                self._sell_budgets[market_info.trading_pair] += event.amount
+                self.exec_hedge_side(event, market_info, True)
+            else:
+                msg = f"({market_info.trading_pair}) Maker SELL order (price: {event.price}) of {event.amount} " \
+                      f"{market_info.base_asset} is filled."
+                self.log_with_clock(logging.INFO, msg)
+                self.notify_hb_app(msg)
+                self._sell_budgets[market_info.trading_pair] -= event.amount
+                self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+                self.exec_hedge_side(event, market_info, False)
+    
+    def exec_hedge_side(self, event, market_info, is_buy):
+        p = ArbProposalSide(
+            self._derivative_market_infos[market_info.trading_pair],
+            not is_buy,
+            event.price,
+            event.amount
+        )
+        safe_ensure_future(self.execute_derivative_side(p))
+        #self.execute_derivative_side(p)
+
+    async def execute_derivative_side(self, arb_side: ArbProposalSide):
+        side = "BUY" if arb_side.is_buy else "SELL"
+        place_order_fn = self.buy_with_specific_market if arb_side.is_buy else self.sell_with_specific_market
+        # len(self.deriv_position) == 0
+        position_action = PositionAction.OPEN
+        self.log_with_clock(logging.INFO,
+                            f"Placing {side} order for {arb_side.amount} {arb_side.market_info.base_asset} "
+                            f"at {arb_side.market_info.market.display_name} at {arb_side.order_price} price.")
+        place_order_fn(arb_side.market_info,
+                       arb_side.amount,
+                       arb_side.market_info.market.get_taker_order_type(),
+                       arb_side.order_price,
+                       position_action=position_action
+                    )
+        #self._deriv_order_ids.append(order_id)
+
     def update_mid_prices(self):
         for market in self._market_infos:
             mid_price = self._market_infos[market].get_mid_price()
             self._mid_prices[market].append(mid_price)
             # To avoid memory leak, we store only the last part of the list needed for volatility calculation
-            max_len = self._volatility_interval
+            max_len = self._volatility_interval * self._avg_volatility_period
             self._mid_prices[market] = self._mid_prices[market][-1 * max_len:]
 
     def update_volatility(self):
