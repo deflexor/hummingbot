@@ -31,7 +31,7 @@ s_decimal_nan = Decimal("NaN")
 lms_logger = None
 
 
-class HedgedLMStrategy(StrategyPyBase):
+class ImanStrategy(StrategyPyBase):
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -50,7 +50,7 @@ class HedgedLMStrategy(StrategyPyBase):
                  status_report_interval: float = 900,
                  hb_app_notification: bool = False):
         super().__init__()
-        #self._exchange = exchange
+        self._exchange = deriv_exchange
         #self._market_infos = market_infos
         self._derivative_market_infos = derivative_market_infos
         self._token = token
@@ -66,7 +66,6 @@ class HedgedLMStrategy(StrategyPyBase):
         self._sell_budgets = {}
         self._buy_budgets = {}
         self._mid_prices = {market: [] for market in derivative_market_infos}
-        self._volatility = {market: s_decimal_nan for market in self._market_infos}
         self._last_vol_reported = 0.
         self._hb_app_notification = hb_app_notification
         self._last_n_losses = 0

@@ -1,6 +1,6 @@
 from decimal import Decimal
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from hummingbot.strategy.iman.iman import HedgedLMStrategy
+from hummingbot.strategy.iman.iman import ImanStrategy
 from hummingbot.strategy.iman.iman_config_map import iman_config_map as c_map
 from hummingbot.core.event.events import (
     PositionMode
@@ -33,7 +33,7 @@ def start(self):
         deriv_market = derivative_market_infos[trading_pair].market
         deriv_market.set_leverage(trading_pair, derivative_leverage)
         deriv_market.set_position_mode(PositionMode.ONEWAY)
-    self.strategy = HedgedLMStrategy(
+    self.strategy = ImanStrategy(
         deriv_exchange=deriv_exchange,
         derivative_market_infos=derivative_market_infos,
         token=token,
