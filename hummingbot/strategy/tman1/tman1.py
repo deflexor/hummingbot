@@ -11,7 +11,7 @@ from hummingbot.strategy.strategy_py_base import StrategyPyBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from .data_types import Proposal
-from hummingbot.core.event.events import OrderType, TradeType, PositionSide
+from hummingbot.core.event.events import OrderType, TradeType, PositionSide, PriceType
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.utils.estimate_fee import estimate_fee
 from hummingbot.strategy.pure_market_making.inventory_skew_calculator import (
@@ -271,12 +271,13 @@ class Tman1Strategy(StrategyPyBase):
         proposal = None
         all_bals = self.adjusted_available_balances()
         for market, market_info in self._market_infos.items():
+            price = market_info.get_price_by_type(PriceType.MidPrice)
             _base, quote = market.split("-")
             bal = all_bals[quote]
-            size1p = price * 0.01
-            bal1p = bal * 0.01
+            size1p = price * Decimal(0.01)
+            bal1p = bal * Decimal(0.01)
             size = self._exchange.quantize_order_size(bal1p / size1p)
-            self.logger().info(f"create_base_proposal order size:{size}")
+            self.logger().info(f"bal:{bal} price:{price} create_base_proposal order size:{size}")
             if self._last_n_losses > 2:
                 self._is_buy = not self._is_buy
                 self._last_n_losses = 0
