@@ -10,8 +10,8 @@ from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy.strategy_py_base import StrategyPyBase
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
-from .data_types import Proposal, PriceSize
-from hummingbot.core.event.events import OrderType, TradeType
+from .data_types import Proposal
+from hummingbot.core.event.events import OrderType, TradeType, PositionSide
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.utils.estimate_fee import estimate_fee
 from hummingbot.strategy.pure_market_making.inventory_skew_calculator import (
@@ -118,7 +118,7 @@ class Tman1Strategy(StrategyPyBase):
 
         self.update_mid_prices()
         self.update_volatility()
-        proposals = self.create_base_proposals()
+        proposals = [self.create_base_proposal()]
         self._token_balances = self.adjusted_available_balances()
         if self._inventory_skew_enabled:
             self.apply_inventory_skew(proposals)

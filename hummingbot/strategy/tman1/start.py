@@ -5,7 +5,7 @@ from hummingbot.strategy.tman1.tman1_config_map import tman1_config_map as c_map
 
 
 def start(self):
-    exchange = c_map.get("exchange").value.lower()
+    exchange = c_map.get("derivative_connector").value.lower()
     el_markets = list(c_map.get("markets").value.split(","))
     token = c_map.get("token").value.upper()
     el_markets = [m.upper() for m in el_markets]

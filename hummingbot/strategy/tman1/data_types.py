@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-
+from decimal import Decimal
+from hummingbot.core.event.events import PositionSide
 """
 Liquidity mining data types...
 """

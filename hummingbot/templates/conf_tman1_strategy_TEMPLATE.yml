@@ -6,7 +6,7 @@ template_version: 3
 strategy: null
 
 # The exchange to run this strategy.
-exchange: null
+derivative_connector: null
 
 # The list of markets, comma separated, e.g. LTC-USDT,ETH-USDT
 # Note: The actual markets will be determined by token below, only markets with the token specified below.

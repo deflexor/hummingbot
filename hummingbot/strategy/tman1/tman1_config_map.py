@@ -26,7 +26,7 @@ def derivative_market_on_validated(value: str) -> None:
 
 def token_validate(value: str) -> Optional[str]:
     value = value.upper()
-    markets = list(liquidity_mining_config_map["markets"].value.split(","))
+    markets = list(tman1_config_map["markets"].value.split(","))
     tokens = set()
     for market in markets:
         tokens.update(set(market.split("-")))
@@ -35,7 +35,7 @@ def token_validate(value: str) -> Optional[str]:
 
 
 def order_size_prompt() -> str:
-    token = liquidity_mining_config_map["token"].value
+    token = tman1_config_map["token"].value
     return f"What is the size of each order (in {token} amount)? >>> "
 
 def derivative_market_validator(value: str) -> None:
@@ -61,20 +61,18 @@ tman1_config_map = {
     "strategy": ConfigVar(
         key="strategy",
         prompt="",
-        default="liquidity_mining"),
-    "exchange":
-        ConfigVar(key="exchange",
-                  prompt="Enter the connector to use for tman1 >>> ",
-                  validator=validate_derivative,
-                  on_validated=exchange_on_validated,
-                  prompt_on_new=True),
+        default="tman1"),
+    "derivative_connector": ConfigVar(
+        key="derivative_connector",
+        prompt="Enter a derivative name (Exchange/AMM) >>> ",
+        prompt_on_new=True,
+        validator=validate_derivative,
+        on_validated=exchange_on_validated),
     "markets":
         ConfigVar(key="markets",
                   prompt="Enter a list of markets (comma separated, e.g. LTC-USDT,ETH-USDT) >>> ",
                   type_str="str",
-                  prompt_on_new=True,
-                  validator=derivative_market_validator,
-                  on_validated=derivative_market_on_validated),
+                  prompt_on_new=True),
     "token":
         ConfigVar(key="token",
                   prompt="What asset (base or quote) do you want to use to provide liquidity? >>> ",
