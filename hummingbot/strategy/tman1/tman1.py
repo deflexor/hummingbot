@@ -270,7 +270,7 @@ class Tman1Strategy(StrategyPyBase):
     def create_base_proposal(self):
         proposal = None
         all_bals = self.adjusted_available_balances()
-        for market, market_info in self._derivative_market_infos.items():
+        for market, market_info in self._market_infos.items():
             _base, quote = market.split("-")
             bal = all_bals[quote]
             size1p = price * 0.01
@@ -393,7 +393,7 @@ class Tman1Strategy(StrategyPyBase):
                                 f"{proposal.size * proposal.price:.2f} {proposal.quote()}")
             place_order_fn = self.buy_with_specific_market if proposal.dir == PositionSide.LONG else self.sell_with_specific_market
             r = place_order_fn(
-                self._derivative_market_infos[proposal.market],
+                self._market_infos[proposal.market],
                 proposal.size,
                 order_type=OrderType.LIMIT_MAKER,
                 price=proposal.price,

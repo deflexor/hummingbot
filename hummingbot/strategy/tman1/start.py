@@ -2,7 +2,9 @@ from decimal import Decimal
 from hummingbot.strategy.market_trading_pair_tuple import MarketTradingPairTuple
 from hummingbot.strategy.tman1.tman1 import Tman1Strategy
 from hummingbot.strategy.tman1.tman1_config_map import tman1_config_map as c_map
-
+from hummingbot.core.event.events import (
+    PositionMode
+)
 
 def start(self):
     exchange = c_map.get("derivative_connector").value.lower()
@@ -28,9 +30,12 @@ def start(self):
     self._initialize_markets([(exchange, markets)])
     exchange = self.markets[exchange]
     market_infos = {}
-    for market in markets:
-        base, quote = market.split("-")
-        market_infos[market] = MarketTradingPairTuple(exchange, market, base, quote)
+    for trading_pair in markets:
+        base, quote = trading_pair.split("-")
+        tpt = MarketTradingPairTuple(exchange, trading_pair, base, quote)
+        market_infos[trading_pair] = tpt
+        tpt.market.set_leverage(trading_pair, 1)
+        tpt.market.set_position_mode(PositionMode.ONEWAY)
     self.strategy = Tman1Strategy(
         exchange=exchange,
         market_infos=market_infos,
