@@ -82,6 +82,8 @@ class Tman1Strategy(StrategyPyBase):
         self._volatility = {market: s_decimal_nan for market in self._market_infos}
         self._last_vol_reported = 0.
         self._hb_app_notification = hb_app_notification
+        self._last_n_losses = 0
+        self._is_buy = True
 
         self.add_markets([exchange])
 
@@ -271,24 +273,23 @@ class Tman1Strategy(StrategyPyBase):
         proposal = None
         all_bals = self.adjusted_available_balances()
         for market, market_info in self._market_infos.items():
-            price = market_info.get_price_by_type(PriceType.MidPrice)
             _base, quote = market.split("-")
             bal = all_bals[quote]
-            size1p = price * Decimal(0.01)
-            bal1p = bal * Decimal(0.01)
-            size = self._exchange.quantize_order_size(bal1p / size1p)
-            self.logger().info(f"bal:{bal} price:{price} create_base_proposal order size:{size}")
+            size = round(bal * Decimal(0.01), 2)
+            self.logger().info(f"bal:{bal} create_base_proposal order size:{size}")
             if self._last_n_losses > 2:
                 self._is_buy = not self._is_buy
                 self._last_n_losses = 0
-            pq = market_info.get_order_price_quantum()
+            
             if self._is_buy:
-                price = market_info.get_price_by_type(PriceType.BestBid) + pq
-                self.logger().info(f"create_base_proposal is_buy price:{market_info.get_price_by_type(PriceType.BestBid)} + {pq} = {price}")
+                price = market_info.get_price_by_type(PriceType.BestBid)
+                pq = -market_info.market.get_order_price_quantum(market, price)
             else:
-                price = market_info.get_price_by_type(PriceType.BestAsk) - pq
+                price = market_info.get_price_by_type(PriceType.BestAsk)
+                pq = market_info.market.get_order_price_quantum(market, price)
+            self.logger().info(f"create_base_proposal is_buy:{self._is_buy} price:{price} + pq:{pq} = {price + pq}")
             side = PositionSide.LONG if self._is_buy else PositionSide.SHORT
-            proposal = Proposal(market, side, price, size)
+            proposal = Proposal(market, side, price+pq, size)
         return proposal
 
     def total_port_value_in_token(self) -> Decimal:
