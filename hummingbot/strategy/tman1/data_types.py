@@ -28,6 +28,7 @@ class Proposal:
         self.price: Decimal = price
         self.tp: Decimal = price + price * Decimal(0.02)
         self.sl: Decimal = price - price * Decimal(0.01)
+        self.base_filled = False
         if dir == PositionSide.SHORT:
             tp = self.tp
             self.tp = self.sl

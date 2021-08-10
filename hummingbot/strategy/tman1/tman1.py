@@ -122,9 +122,9 @@ class Tman1Strategy(StrategyPyBase):
         self.update_volatility()
         proposals = [self.create_base_proposal()]
         self._token_balances = self.adjusted_available_balances()
-        if self._inventory_skew_enabled:
-            self.apply_inventory_skew(proposals)
-        self.apply_budget_constraint(proposals)
+        #if self._inventory_skew_enabled:
+        #    self.apply_inventory_skew(proposals)
+        #self.apply_budget_constraint(proposals)
         self.cancel_active_orders(proposals)
         self.execute_orders_proposal(proposals)
 
@@ -339,16 +339,14 @@ class Tman1Strategy(StrategyPyBase):
     def apply_budget_constraint(self, proposals: List[Proposal]):
         balances = self._token_balances.copy()
         for proposal in proposals:
-            if balances[proposal.base()] < proposal.sell.size:
-                proposal.sell.size = balances[proposal.base()]
-            proposal.sell.size = self._exchange.quantize_order_amount(proposal.market, proposal.sell.size)
-            balances[proposal.base()] -= proposal.sell.size
+            proposal.size = self._exchange.quantize_order_amount(proposal.market, proposal.size)
+            balances[proposal.base()] -= proposal.size
 
-            quote_size = proposal.buy.size * proposal.buy.price
+            quote_size = proposal.size * proposal.price
             quote_size = balances[proposal.quote()] if balances[proposal.quote()] < quote_size else quote_size
             buy_fee = estimate_fee(self._exchange.name, True)
-            buy_size = quote_size / (proposal.buy.price * (Decimal("1") + buy_fee.percent))
-            proposal.buy.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
+            buy_size = quote_size / (proposal.price * (Decimal("1") + buy_fee.percent))
+            proposal.size = self._exchange.quantize_order_amount(proposal.market, buy_size)
             balances[proposal.quote()] -= quote_size
 
     def is_within_tolerance(self, cur_orders: List[LimitOrder], proposal: Proposal):
@@ -356,15 +354,17 @@ class Tman1Strategy(StrategyPyBase):
         False if there are no buys or sells or if the difference between the proposed price and current price is less
         than the tolerance. The tolerance value is strict max, cannot be equal.
         """
+        proposal.base_filled:
+            return True
         cur_buy = [o for o in cur_orders if o.is_buy]
         cur_sell = [o for o in cur_orders if not o.is_buy]
-        if (cur_buy and proposal.buy.size <= 0) or (cur_sell and proposal.sell.size <= 0):
+        if (cur_buy or cur_sell) and proposal.size <= 0:
             return False
         if cur_buy and \
-                abs(proposal.buy.price - cur_buy[0].price) / cur_buy[0].price > self._order_refresh_tolerance_pct:
+                abs(proposal.price - cur_buy[0].price) / cur_buy[0].price > self._order_refresh_tolerance_pct:
             return False
         if cur_sell and \
-                abs(proposal.sell.price - cur_sell[0].price) / cur_sell[0].price > self._order_refresh_tolerance_pct:
+                abs(proposal.price - cur_sell[0].price) / cur_sell[0].price > self._order_refresh_tolerance_pct:
             return False
         return True
 
@@ -399,7 +399,6 @@ class Tman1Strategy(StrategyPyBase):
                 proposal.size,
                 order_type=OrderType.LIMIT_MAKER,
                 price=proposal.price,
-                position_action = PositionAction.OPEN,
                 expiration_seconds = 1 # mark base order
             )
             self.logger().info(f"place_order_fn result: {r}")
