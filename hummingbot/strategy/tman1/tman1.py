@@ -84,6 +84,7 @@ class Tman1Strategy(StrategyPyBase):
         self._hb_app_notification = hb_app_notification
         self._last_n_losses = 0
         self._is_buy = True
+        self.proposals = []
 
         self.add_markets([exchange])
 
@@ -120,13 +121,14 @@ class Tman1Strategy(StrategyPyBase):
 
         self.update_mid_prices()
         self.update_volatility()
-        proposals = [self.create_base_proposal()]
+        if len(self.proposals) == 0:
+            self.proposals = [self.create_base_proposal()]
         self._token_balances = self.adjusted_available_balances()
         #if self._inventory_skew_enabled:
         #    self.apply_inventory_skew(proposals)
         #self.apply_budget_constraint(proposals)
-        self.cancel_active_orders(proposals)
-        self.execute_orders_proposal(proposals)
+        self.cancel_active_orders(self.proposals)
+        self.execute_orders_proposal(self.proposals)
 
         self._last_timestamp = timestamp
 
@@ -276,6 +278,8 @@ class Tman1Strategy(StrategyPyBase):
             _base, quote = market.split("-")
             bal = all_bals[quote]
             size = round(bal * Decimal(0.01), 2)
+            if size < 1:
+                size = Decimal(1)
             self.logger().info(f"bal:{bal} create_base_proposal order size:{size}")
             if self._last_n_losses > 2:
                 self._is_buy = not self._is_buy
@@ -354,7 +358,7 @@ class Tman1Strategy(StrategyPyBase):
         False if there are no buys or sells or if the difference between the proposed price and current price is less
         than the tolerance. The tolerance value is strict max, cannot be equal.
         """
-        proposal.base_filled:
+        if proposal.base_filled:
             return True
         cur_buy = [o for o in cur_orders if o.is_buy]
         cur_sell = [o for o in cur_orders if not o.is_buy]
@@ -499,6 +503,29 @@ class Tman1Strategy(StrategyPyBase):
                 self.notify_hb_app_with_timestamp(msg)
                 self._sell_budgets[market_info.trading_pair] -= event.amount
                 self._buy_budgets[market_info.trading_pair] += (event.amount * event.price)
+            for proposal in self.proposals:
+                if proposal.base_filled:
+                    # cancel leftover tp or sl
+                    restored_orders = self._exchange.limit_orders
+                    for order in restored_orders:
+                        self._exchange.cancel(order.trading_pair, order.client_order_id)
+                    self.proposals = []
+                else:
+                    proposal.base_filled = True
+                    place_order_fn = self.sell_with_specific_market if proposal.dir == PositionSide.LONG else self.buy_with_specific_market
+                    r = place_order_fn(
+                        self._market_infos[proposal.market],
+                        proposal.size,
+                        order_type=OrderType.LIMIT_MAKER,
+                        price=proposal.tp
+                    )
+                    r = place_order_fn(
+                        self._market_infos[proposal.market],
+                        proposal.size,
+                        order_type=OrderType.LIMIT_MAKER,
+                        price=proposal.sl
+                    )
+
 
     def update_mid_prices(self):
         """
